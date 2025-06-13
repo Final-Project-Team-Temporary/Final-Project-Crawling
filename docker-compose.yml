@@ -1,0 +1,31 @@
+version: "3.8"
+
+services:
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A celery_task worker --loglevel=info
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A beat_schedule beat --loglevel=info
+    depends_on:
+      - redis
+    env_file:
+      - .env
+    volumes:
+      - .:/app
