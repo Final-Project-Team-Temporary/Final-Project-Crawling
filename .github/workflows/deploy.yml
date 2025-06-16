@@ -19,7 +19,7 @@ jobs:
         username: ${{ secrets.EC2_USERNAME }}
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          sudo echo "${{ secrets.APPLICATION_PROPERTIES }}" > /home/ubuntu/crawler/.env
+          echo "${{ secrets.APPLICATION_PROPERTIES }}" | sudo tee /home/ubuntu/crawler/.env > /dev/null
           
 
     - name: Deploy to EC2 via SSH
