@@ -29,8 +29,8 @@ jobs:
         username: ubuntu
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          sudo cd /home/ubuntu/crawler
-          git pull origin main
-          docker compose down
-          docker compose pull
-          docker compose up -d --build
+          cd /home/ubuntu/crawler && \
+          git pull origin main && \
+          docker-compose down && \
+          docker-compose pull && \
+          docker-compose up -d --build
