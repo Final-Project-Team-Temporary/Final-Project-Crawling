@@ -1,0 +1,44 @@
+name: Deploy to EC2 with Docker Compose
+
+on:
+  push:
+    branches: [ release ]  # 또는 deploy 브랜치 등
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v3
+
+    - name: Upload Project to EC2
+      uses: appleboy/scp-action@v0.1.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        source: "."
+        target: "/home/ubuntu/crawler"
+
+    - name: Generate .env on EC2
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          echo "${{ secrets.APPLICATION_PROPERTIES }}" > /home/ubuntu/crawler/.env
+          
+
+    - name: Deploy with Docker Compose
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USERNAME }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        script: |
+          cd /home/ubuntu/crawler
+          docker compose down
+          docker compose pull
+          docker compose up -d --build

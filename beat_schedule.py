@@ -10,6 +10,6 @@ app.config_from_object("celery")
 app.conf.beat_schedule = {
     "crawl-and-save-every-minute": {
         "task": "celery_task.crawl_and_store_articles",
-        "schedule": crontab(minute="*/30"),  # 매 1분마다
+        "schedule": crontab(minute="*/60"),  # 매 1분마다
     },
 }
