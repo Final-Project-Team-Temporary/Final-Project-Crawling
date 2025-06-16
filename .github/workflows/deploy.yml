@@ -19,7 +19,7 @@ jobs:
         username: ${{ secrets.EC2_USERNAME }}
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          echo "${{ secrets.APPLICATION_PROPERTIES }}" > /home/ubuntu/crawler/.env
+          sudo echo "${{ secrets.APPLICATION_PROPERTIES }}" > /home/ubuntu/crawler/.env
           
 
     - name: Deploy to EC2 via SSH
@@ -29,7 +29,7 @@ jobs:
         username: ubuntu
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          cd /home/ubuntu/crawler
+          sudo cd /home/ubuntu/crawler
           git pull origin main
           docker compose down
           docker compose pull
