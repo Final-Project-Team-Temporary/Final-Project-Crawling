@@ -1,37 +1,102 @@
-name: Deploy to EC2 with Docker Compose
+name: Build, Push to Docker Hub and Deploy to EC2
 
 on:
   push:
-    branches: [ release ]  # 또는 deploy 브랜치 등
+    branches: [ release ]
 
 jobs:
-  deploy:
+  build-and-push:
     runs-on: ubuntu-latest
-
+    
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
-    - name: Generate .env on EC2
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.SB_DOCKERHUB_USERNAME }}
+        password: ${{ secrets.SB_DOCKERHUB_PASSWORD }}
+
+    - name: Build and Push Docker Image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        push: true
+        tags: |
+          ${{ secrets.SB_DOCKERHUB_USERNAME }}/scrapy-crawler:latest
+          ${{ secrets.SB_DOCKERHUB_USERNAME }}/scrapy-crawler:${{ github.sha }}
+        platforms: linux/amd64,linux/arm64
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Deploy to EC2
       uses: appleboy/ssh-action@v1.0.0
       with:
         host: ${{ secrets.EC2_HOST }}
         username: ${{ secrets.EC2_USERNAME }}
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
-          echo "${{ secrets.APPLICATION_PROPERTIES }}" | sudo tee /home/ubuntu/crawler/.env > /dev/null
+          # 기존 컨테이너 정리
+          cd /home/ubuntu/scrapy-crawler || mkdir -p /home/ubuntu/scrapy-crawler
+          cd /home/ubuntu/scrapy-crawler
           
+          # .env 파일 생성
+          echo "${{ secrets.APPLICATION_PROPERTIES }}" > .env
+          
+          # docker-compose.yml 생성
+          cat << 'EOF' > docker-compose.yml
+          version: "3.8"
 
+          services:
+            redis:
+              image: redis:latest
+              ports:
+                - "6379:6379"
+              restart: unless-stopped
 
-    - name: Deploy to EC2 via SSH
-      uses: appleboy/ssh-action@v1.0.0
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ubuntu
-        key: ${{ secrets.EC2_SSH_KEY }}
-        script: |
-          cd /home/ubuntu/crawler && \
-          git pull origin main && \
-          docker-compose down && \
-          docker-compose pull && \
-          docker-compose up -d --build
+            celery_worker:
+              image: ${{ secrets.SB_DOCKERHUB_USERNAME }}/scrapy-crawler:latest
+              command: celery -A celery_task worker --loglevel=info
+              depends_on:
+                - redis
+              env_file:
+                - .env
+              volumes:
+                - ./output:/app/output
+              restart: unless-stopped
+
+            celery_beat:
+              image: ${{ secrets.SB_DOCKERHUB_USERNAME }}/scrapy-crawler:latest
+              command: celery -A beat_schedule beat --loglevel=info
+              depends_on:
+                - redis
+              env_file:
+                - .env
+              volumes:
+                - ./output:/app/output
+              restart: unless-stopped
+          EOF
+          
+          # 기존 컨테이너 중지 및 제거
+          docker-compose down || true
+          
+          # 최신 이미지 pull
+          docker pull ${{ secrets.SB_DOCKERHUB_USERNAME }}/scrapy-crawler:latest
+          
+          # 컨테이너 실행
+          docker-compose up -d
+          
+          # 로그 확인 (선택사항)
+          sleep 10
+          docker-compose logs --tail=50
