@@ -12,15 +12,6 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v3
 
-    - name: Upload Project to EC2
-      uses: appleboy/scp-action@v0.1.3
-      with:
-        host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USERNAME }}
-        key: ${{ secrets.EC2_SSH_KEY }}
-        source: "."
-        target: "/home/ubuntu/crawler"
-
     - name: Generate .env on EC2
       uses: appleboy/ssh-action@v1.0.0
       with:
@@ -31,14 +22,15 @@ jobs:
           echo "${{ secrets.APPLICATION_PROPERTIES }}" > /home/ubuntu/crawler/.env
           
 
-    - name: Deploy with Docker Compose
+    - name: Deploy to EC2 via SSH
       uses: appleboy/ssh-action@v1.0.0
       with:
         host: ${{ secrets.EC2_HOST }}
-        username: ${{ secrets.EC2_USERNAME }}
+        username: ubuntu
         key: ${{ secrets.EC2_SSH_KEY }}
         script: |
           cd /home/ubuntu/crawler
+          git pull origin main
           docker compose down
           docker compose pull
           docker compose up -d --build
