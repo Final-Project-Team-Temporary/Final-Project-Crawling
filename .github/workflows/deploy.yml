@@ -22,6 +22,7 @@ jobs:
           echo "${{ secrets.APPLICATION_PROPERTIES }}" | sudo tee /home/ubuntu/crawler/.env > /dev/null
           
 
+
     - name: Deploy to EC2 via SSH
       uses: appleboy/ssh-action@v1.0.0
       with:
