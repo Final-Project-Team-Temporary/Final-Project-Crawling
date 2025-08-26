@@ -21,7 +21,7 @@ jobs:
       with:
         aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+        aws-region: ap-northeast-2
 
     - name: Login to Amazon ECR
       id: login-ecr
@@ -46,19 +46,18 @@ jobs:
         aws lambda update-function-code \
           --function-name $LAMBDA_FUNCTION_NAME \
           --image-uri $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-          --region ${{ env.AWS_REGION }}
+          --region ap-northeast-2
         # 함수 업데이트가 완료될 때까지 대기
         aws lambda wait function-updated \
           --function-name $LAMBDA_FUNCTION_NAME \
-          --region $AWS_REGION
+          --region ap-northeast-2
 
     - name: Update Lambda environment variables
       env:
         LAMBDA_FUNCTION_NAME: ${{ env.LAMBDA_FUNCTION_NAME }}
       run: |
         ENV_STRING=$(echo '${{ secrets.LAMBDA_ENV_JSON }}' | jq -r 'to_entries | map("\(.key)=\(.value)") | join(",")')
-        echo "ENV_STRING=$ENV_STRING"
         aws lambda update-function-configuration \
           --function-name $LAMBDA_FUNCTION_NAME \
           --environment Variables={$ENV_STRING} \
-          --region ${{ env.AWS_REGION }}
+          --region ap-northeast-2
