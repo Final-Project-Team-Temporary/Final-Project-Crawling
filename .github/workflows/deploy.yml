@@ -56,8 +56,8 @@ jobs:
       env:
         LAMBDA_FUNCTION_NAME: ${{ env.LAMBDA_FUNCTION_NAME }}
       run: |
-        ENV_STRING=$(cat $GITHUB_ENV | paste -sd "," -)   # 라인들을 , 로 합치기
-        echo ENV_STRING=$ENV_STRING
+        ENV_STRING=$(echo '${{ secrets.LAMBDA_ENV_JSON }}' | jq -r 'to_entries | map("\(.key)=\(.value)") | join(",")')
+        echo "ENV_STRING=$ENV_STRING"
         aws lambda update-function-configuration \
           --function-name $LAMBDA_FUNCTION_NAME \
           --environment Variables={$ENV_STRING} \
