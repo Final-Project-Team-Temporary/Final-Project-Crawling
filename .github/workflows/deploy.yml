@@ -54,5 +54,5 @@ jobs:
       run: |
         aws lambda update-function-configuration \
           --function-name $LAMBDA_FUNCTION_NAME \
-          --environment Variables='${{ env.LAMBDA_ENV_JSON }}' \
+          --environment "Variables=$(echo '${{ secrets.LAMBDA_ENV_JSON }}' | jq -c .)" \
           --region ${{ env.AWS_REGION }}
