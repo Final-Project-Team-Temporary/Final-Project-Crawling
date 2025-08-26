@@ -12,7 +12,7 @@ jobs:
     - name: Parse secrets
       run: |
         echo '${{ secrets.LAMBDA_ENV_JSON }}' | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> $GITHUB_ENV
-
+        echo '${{ secrets.AWS_ENV_JSON }}' | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> $GITHUB_ENV
     - name: Checkout Repository
       uses: actions/checkout@v4
 
@@ -21,7 +21,7 @@ jobs:
       with:
         aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
         aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ap-northeast-2
+        aws-region: ${{ env.AWS_REGION }}
 
     - name: Login to Amazon ECR
       id: login-ecr
@@ -46,11 +46,11 @@ jobs:
         aws lambda update-function-code \
           --function-name $LAMBDA_FUNCTION_NAME \
           --image-uri $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-          --region ap-northeast-2
+          --region ${{ env.AWS_REGION }}
         # 함수 업데이트가 완료될 때까지 대기
         aws lambda wait function-updated \
           --function-name $LAMBDA_FUNCTION_NAME \
-          --region ap-northeast-2
+          --region ${{ env.AWS_REGION }}
 
     - name: Update Lambda environment variables
       env:
@@ -60,4 +60,4 @@ jobs:
         aws lambda update-function-configuration \
           --function-name $LAMBDA_FUNCTION_NAME \
           --environment Variables={$ENV_STRING} \
-          --region ap-northeast-2
+          --region ${{ env.AWS_REGION }}
