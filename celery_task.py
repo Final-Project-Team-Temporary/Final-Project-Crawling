@@ -11,8 +11,8 @@ load_dotenv()
 app = Celery('tasks', broker=os.getenv("REDIS_URL"))
 
 # 2. MongoDB 연결
-mongo_uri = os.getenv("MONGO_URI")
-client = MongoClient(mongo_uri)
+mongo_url = os.getenv("MONGO_URL")
+client = MongoClient(mongo_url)
 db = client['ArticleDatabase']
 collection = db['articles']
 
