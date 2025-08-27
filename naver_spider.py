@@ -22,7 +22,7 @@ class NaverNewsSpider(scrapy.Spider):
 
     def parse(self, response):
         links = response.css("ul.sa_list li.sa_item a.sa_text_title::attr(href)").getall()
-        for link in links[:60]:  # 상위 30개 기사
+        for link in links[:10]:  # Lambda 환경에서 빠른 처리를 위해 10개로 제한
             if not link.startswith("http"):
                 link = "https://n.news.naver.com" + link
             yield scrapy.Request(link, callback=self.parse_article)
@@ -56,10 +56,15 @@ class NaverNewsSpider(scrapy.Spider):
 if __name__ == "__main__":
     output_path = os.getenv("OUTPUT_FILE_PATH", "output.json")
     process = CrawlerProcess(settings={
-        "USER_AGENT": "Mozilla/5.0",
+        "USER_AGENT": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
         "LOG_LEVEL": "INFO",
         "FEED_FORMAT": "jsonlines",
-        "FEED_URI": output_path
+        "FEED_URI": output_path,
+        "CONCURRENT_REQUESTS": 2,  # 동시 요청 수 제한
+        "DOWNLOAD_DELAY": 1,       # 요청 간 1초 대기
+        "DOWNLOAD_TIMEOUT": 10,    # 10초 타임아웃
+        "RETRY_TIMES": 2,          # 재시도 2회
+        "ROBOTSTXT_OBEY": False    # robots.txt 무시 (속도 향상)
     })
     process.crawl(NaverNewsSpider)
     process.start()
