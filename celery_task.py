@@ -20,10 +20,11 @@ collection = db['articles']
 def crawl_and_store_articles():
     print("🚀 크롤링 시작: python naver_spider.py 실행")
 
-    # 3. 기존 output.json 삭제 (덮어쓰기 방지)
-    if os.path.exists("output.json"):
-
-        os.remove("output.json")
+    output_path = os.getenv("OUTPUT_FILE_PATH", "output.json")
+    
+    # 3. 기존 output 파일 삭제 (덮어쓰기 방지)
+    if os.path.exists(output_path):
+        os.remove(output_path)
 
     # 4. Scrapy 크롤러 실행
     result = subprocess.run(
@@ -38,16 +39,16 @@ def crawl_and_store_articles():
         print(result.stderr)
         return
 
-    # 5. output.json 확인
-    if not os.path.exists("output.json"):
-        print("❌ output.json 파일 없음")
+    # 5. output 파일 확인
+    if not os.path.exists(output_path):
+        print(f"❌ {output_path} 파일 없음")
         return
 
-    print("📦 output.json 확인 완료, MongoDB 저장 시작")
+    print(f"📦 {output_path} 확인 완료, MongoDB 저장 시작")
 
     # 6. JSON 라인별 로딩 및 저장
     new_count = 0
-    with open("output.json", "r", encoding="utf-8") as f:
+    with open(output_path, "r", encoding="utf-8") as f:
         for line in f:
             if not line.strip():
                 continue

@@ -1,6 +1,10 @@
 import scrapy
 from scrapy.crawler import CrawlerProcess
 import time
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class NaverNewsSpider(scrapy.Spider):
@@ -50,11 +54,12 @@ class NaverNewsSpider(scrapy.Spider):
 
 
 if __name__ == "__main__":
+    output_path = os.getenv("OUTPUT_FILE_PATH", "output.json")
     process = CrawlerProcess(settings={
         "USER_AGENT": "Mozilla/5.0",
         "LOG_LEVEL": "INFO",
         "FEED_FORMAT": "jsonlines",
-        "FEED_URI": "output.json"
+        "FEED_URI": output_path
     })
     process.crawl(NaverNewsSpider)
     process.start()
