@@ -5,14 +5,17 @@ on:
     branches: [ main ]
 
 jobs:
-  build-and-deploy:
+  build-push:
     runs-on: ubuntu-latest
+    outputs:
+      image-uri: ${{ steps.build.outputs.image-uri }}
     
     steps:
     - name: Parse secrets
       run: |
         echo '${{ secrets.LAMBDA_ENV_JSON }}' | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> $GITHUB_ENV
         echo '${{ secrets.AWS_ENV_JSON }}' | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> $GITHUB_ENV
+
     - name: Checkout Repository
       uses: actions/checkout@v4
 
@@ -28,29 +31,47 @@ jobs:
       uses: aws-actions/amazon-ecr-login@v2
 
     - name: Build, tag, and push image to Amazon ECR
+      id: build
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
         IMAGE_TAG: latest
       run: |
+        IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
         docker buildx build \
-        --platform linux/arm64 \
-        -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
-        --push \
-        --provenance=false \
-        --sbom=false \
-        .
+          --platform linux/arm64 \
+          -t $IMAGE_URI \
+          --push \
+          --provenance=false \
+          --sbom=false \
+          .
+        echo "image-uri=$IMAGE_URI" >> $GITHUB_OUTPUT
+
+  lambda-deploy:
+    needs: build-push
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Parse secrets
+      run: |
+        echo '${{ secrets.LAMBDA_ENV_JSON }}' | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> $GITHUB_ENV
+        echo '${{ secrets.AWS_ENV_JSON }}' | jq -r 'to_entries[] | "\(.key)=\(.value)"' >> $GITHUB_ENV
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
     - name: Update Lambda function
       env:
-        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
-        IMAGE_TAG: latest
+        IMAGE_URI: ${{ needs.build-push.outputs.image-uri }}
         LAMBDA_FUNCTION_NAME: ${{ env.LAMBDA_FUNCTION_NAME }}
       run: |
         aws lambda update-function-code \
           --function-name $LAMBDA_FUNCTION_NAME \
-          --image-uri $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+          --image-uri $IMAGE_URI \
           --region ${{ env.AWS_REGION }}
         # 함수 업데이트가 완료될 때까지 대기
         aws lambda wait function-updated \
