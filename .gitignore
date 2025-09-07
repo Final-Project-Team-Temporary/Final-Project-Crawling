@@ -8,3 +8,4 @@ celerybeat-schedule-shm
 celerybeat-schedule-wal
 __pycache__
 *.pyc
+.idea/*
