@@ -15,8 +15,10 @@ app = Celery('tasks', broker=os.getenv("REDIS_URL"))
 # 2. MongoDB 연결
 mongo_url = os.getenv("MONGO_URL")
 client = MongoClient(mongo_url)
-db = client['ArticleDatabase']
-collection = db['articles']
+db_name = os.getenv("MONGO_DB_NAME", "ArticleDatabase")
+collection_name = os.getenv("MONGO_COLLECTION_NAME", "articles")
+db = client[db_name]
+collection = db[collection_name]
 
 def send_summarization_request(article_ids):
     """
