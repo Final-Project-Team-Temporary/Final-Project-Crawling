@@ -115,6 +115,11 @@ def crawl_and_store_articles(self):
                 continue
             try:
                 article = json.loads(line)
+
+                # publishedAt을 datetime 객체로 변환 (MongoDB Date 타입으로 저장)
+                if article.get("publishedAt"):
+                    article["publishedAt"] = datetime.fromisoformat(article["publishedAt"])
+
                 if not collection.find_one({"url": article.get("url")}):
                     # 새 기사를 MongoDB에 저장하고 _id 반환
                     result = collection.insert_one(article)
