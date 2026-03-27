@@ -1,10 +1,12 @@
 """
 test_article_publisher.py
-article_publisher 모듈의 단위 테스트 (시나리오 1~23)
+article_publisher 모듈의 단위 테스트 (시나리오 AP-01 ~ AP-35)
 """
 
 import json
 import os
+from datetime import datetime
+
 import pytest
 from unittest.mock import MagicMock, call
 
@@ -377,9 +379,57 @@ class TestRunCrawler:
         assert len(result) == 2, "잘못된 JSON 라인 1건은 건너뛰고 나머지 2건이 파싱되어야 함"
         assert all("url" in a for a in result), "정상 파싱된 기사에 url 필드가 있어야 함"
 
+    def test_crawl_since_env_set_when_since_dt_provided(self, mocker, env_vars):
+        """
+        [AP-24] since_dt를 전달하면 subprocess에 CRAWL_SINCE 환경변수가
+        ISO 8601 형식으로 설정되어야 한다.
+        """
+        # Arrange
+        since = datetime(2025, 1, 15, 12, 0, 0)
+        captured_envs: list[dict] = []
+
+        def capture_env(*args, **kwargs):
+            captured_envs.append(dict(kwargs.get("env", {})))
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mocker.patch("article_publisher.subprocess.run", side_effect=capture_env)
+
+        # Act
+        article_publisher.run_crawler(since_dt=since)
+
+        # Assert
+        assert len(captured_envs) == 1
+        assert "CRAWL_SINCE" in captured_envs[0], \
+            "since_dt를 전달하면 subprocess 환경에 CRAWL_SINCE가 있어야 함"
+        assert captured_envs[0]["CRAWL_SINCE"] == "2025-01-15T12:00:00", \
+            "CRAWL_SINCE는 ISO 8601 형식이어야 함"
+
+    def test_crawl_since_removed_when_since_dt_is_none(self, mocker, env_vars, monkeypatch):
+        """
+        [AP-25] since_dt=None이면 CRAWL_SINCE가 subprocess 환경에 없어야 한다.
+        이전 실행에서 CRAWL_SINCE가 환경변수에 남아 있어도 제거되어야 한다.
+        """
+        # Arrange — 이미 CRAWL_SINCE가 환경에 존재하는 상황
+        monkeypatch.setenv("CRAWL_SINCE", "2025-01-01T00:00:00")
+        captured_envs: list[dict] = []
+
+        def capture_env(*args, **kwargs):
+            captured_envs.append(dict(kwargs.get("env", {})))
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        mocker.patch("article_publisher.subprocess.run", side_effect=capture_env)
+
+        # Act
+        article_publisher.run_crawler(since_dt=None)
+
+        # Assert
+        assert len(captured_envs) == 1
+        assert "CRAWL_SINCE" not in captured_envs[0], \
+            "since_dt=None이면 subprocess 환경에서 CRAWL_SINCE가 제거되어야 함"
+
     def test_previous_output_file_deleted(self, mocker, env_vars):
         """
-        [19] run_crawler 호출 전 OUTPUT_FILE_PATH에 파일이 존재하면
+        [AP-19] run_crawler 호출 전 OUTPUT_FILE_PATH에 파일이 존재하면
         subprocess 실행 전에 해당 파일이 삭제되어야 한다.
         """
         # Arrange
@@ -502,7 +552,7 @@ class TestCrawlAndPublish:
 
     def test_no_failed_file_when_all_success(self, mocker, env_vars, tmp_path):
         """
-        [23] 모든 기사가 성공적으로 발행되면 실패 파일이 생성되지 않아야 한다.
+        [AP-23] 모든 기사가 성공적으로 발행되면 실패 파일이 생성되지 않아야 한다.
         """
         # Arrange
         failed_path = str(tmp_path / "failed_articles.json")
@@ -526,3 +576,212 @@ class TestCrawlAndPublish:
         # Assert
         assert not os.path.exists(failed_path), \
             "전체 발행 성공 시 실패 파일이 생성되면 안 됨"
+
+
+# ===========================================================================
+# get_last_crawl_time() — 시나리오 AP-26 ~ AP-29
+# ===========================================================================
+
+class TestGetLastCrawlTime:
+
+    def test_returns_datetime_when_key_has_value(self, fake_redis, env_vars_with_last_crawl):
+        """
+        [AP-26] REDIS_LAST_CRAWL_KEY에 ISO 8601 datetime이 저장돼 있으면
+        해당 값을 datetime으로 반환해야 한다.
+        """
+        # Arrange
+        key = env_vars_with_last_crawl["REDIS_LAST_CRAWL_KEY"]
+        fake_redis.set(key, "2025-03-01T10:00:00")
+
+        # Act
+        result = article_publisher.get_last_crawl_time(fake_redis)
+
+        # Assert
+        assert result == datetime(2025, 3, 1, 10, 0, 0), \
+            "저장된 ISO 8601 값이 datetime으로 변환되어야 함"
+
+    def test_returns_none_when_key_has_no_value(self, fake_redis, env_vars_with_last_crawl):
+        """
+        [AP-27] REDIS_LAST_CRAWL_KEY가 설정됐지만 Redis에 값이 없으면 None을 반환해야 한다.
+        초기 실행(첫 번째 크롤링)에 해당한다.
+        """
+        # Act
+        result = article_publisher.get_last_crawl_time(fake_redis)
+
+        # Assert
+        assert result is None, \
+            "Redis에 값이 없으면 None을 반환하여 전체 크롤링이 수행되어야 함"
+
+    def test_returns_none_when_env_key_not_set(self, fake_redis, env_vars):
+        """
+        [AP-28] REDIS_LAST_CRAWL_KEY 환경변수가 없으면 None을 반환해야 한다.
+        증분 크롤링이 비활성화된 것으로 간주한다.
+        """
+        # env_vars fixture에는 REDIS_LAST_CRAWL_KEY가 포함되지 않음
+        # Act
+        result = article_publisher.get_last_crawl_time(fake_redis)
+
+        # Assert
+        assert result is None, \
+            "REDIS_LAST_CRAWL_KEY가 없으면 None을 반환해야 함"
+
+    def test_returns_none_on_redis_error(self, mocker, env_vars_with_last_crawl):
+        """
+        [AP-29] Redis .get()이 Exception을 던지면 None을 반환하고 예외가 전파되지 않아야 한다.
+        Redis 장애 시 전체 크롤링으로 자동 폴백된다.
+        """
+        # Arrange
+        mock_client = MagicMock()
+        mock_client.get.side_effect = Exception("connection lost")
+
+        # Act
+        result = article_publisher.get_last_crawl_time(mock_client)
+
+        # Assert
+        assert result is None, \
+            "Redis 오류 시 None을 반환하고 예외가 전파되면 안 됨"
+
+
+# ===========================================================================
+# update_last_crawl_time() — 시나리오 AP-30 ~ AP-32
+# ===========================================================================
+
+class TestUpdateLastCrawlTime:
+
+    def test_success_stores_iso_format_and_returns_true(
+        self, fake_redis, env_vars_with_last_crawl
+    ):
+        """
+        [AP-30] datetime을 전달하면 ISO 8601 형식으로 Redis에 저장하고 True를 반환해야 한다.
+        """
+        # Arrange
+        key = env_vars_with_last_crawl["REDIS_LAST_CRAWL_KEY"]
+        dt = datetime(2025, 3, 15, 9, 30, 0)
+
+        # Act
+        result = article_publisher.update_last_crawl_time(fake_redis, dt)
+
+        # Assert
+        assert result is True, "저장 성공 시 True를 반환해야 함"
+        stored = fake_redis.get(key)
+        assert stored == "2025-03-15T09:30:00", \
+            "datetime이 ISO 8601 형식으로 저장되어야 함"
+
+    def test_returns_false_when_env_key_not_set(self, fake_redis, env_vars):
+        """
+        [AP-31] REDIS_LAST_CRAWL_KEY 환경변수가 없으면 False를 반환하고
+        Redis에 아무것도 저장하지 않아야 한다.
+        """
+        # Arrange
+        dt = datetime(2025, 3, 15, 9, 30, 0)
+
+        # Act
+        result = article_publisher.update_last_crawl_time(fake_redis, dt)
+
+        # Assert
+        assert result is False, \
+            "REDIS_LAST_CRAWL_KEY 없을 때 False를 반환해야 함"
+
+    def test_returns_false_on_redis_error(self, mocker, env_vars_with_last_crawl):
+        """
+        [AP-32] Redis .set()이 Exception을 던지면 False를 반환하고 예외가 전파되지 않아야 한다.
+        """
+        # Arrange
+        mock_client = MagicMock()
+        mock_client.set.side_effect = Exception("redis full")
+        dt = datetime(2025, 3, 15, 9, 30, 0)
+
+        # Act
+        result = article_publisher.update_last_crawl_time(mock_client, dt)
+
+        # Assert
+        assert result is False, \
+            "Redis 오류 시 False를 반환하고 예외가 전파되면 안 됨"
+
+
+# ===========================================================================
+# crawl_and_publish() 증분 크롤링 흐름 — 시나리오 AP-33 ~ AP-35
+# ===========================================================================
+
+class TestCrawlAndPublishIncrementalFlow:
+
+    def test_since_dt_from_redis_is_passed_to_run_crawler(
+        self, mocker, env_vars_with_last_crawl, fake_redis
+    ):
+        """
+        [AP-33] REDIS_LAST_CRAWL_KEY에 저장된 시각이 run_crawler(since_dt=...)로
+        그대로 전달되어야 한다.
+
+        검증 목적: crawl_and_publish()가 Redis에서 읽은 since_dt를 크롤러에 넘기는
+        전체 데이터 흐름이 올바른지 확인한다.
+        """
+        # Arrange
+        key = env_vars_with_last_crawl["REDIS_LAST_CRAWL_KEY"]
+        since = datetime(2025, 2, 1, 0, 0, 0)
+        fake_redis.set(key, since.isoformat())
+
+        mocker.patch("article_publisher.get_redis_client", return_value=fake_redis)
+        mock_run_crawler = mocker.patch("article_publisher.run_crawler", return_value=[])
+        mocker.patch("article_publisher.load_published_urls", return_value=set())
+
+        # Act
+        article_publisher.crawl_and_publish()
+
+        # Assert
+        mock_run_crawler.assert_called_once_with(since), \
+            "Redis에서 읽은 since_dt가 run_crawler에 전달되어야 함"
+
+    def test_last_crawl_time_updated_when_articles_crawled(
+        self, mocker, env_vars_with_last_crawl, fake_redis, sample_articles
+    ):
+        """
+        [AP-34] 크롤링 기사가 1건 이상이면 crawl_start 시각으로
+        last_crawl_time이 업데이트되어야 한다.
+
+        검증 목적: 다음 실행 시 증분 크롤링이 올바른 기준 시각을 사용하는지 보장한다.
+        """
+        # Arrange
+        key = env_vars_with_last_crawl["REDIS_LAST_CRAWL_KEY"]
+
+        mocker.patch("article_publisher.get_redis_client", return_value=fake_redis)
+        mocker.patch("article_publisher.run_crawler", return_value=sample_articles[:1])
+        mocker.patch("article_publisher.load_published_urls", return_value=set())
+        mocker.patch("article_publisher.publish_article", return_value=True)
+
+        # Act
+        article_publisher.crawl_and_publish()
+
+        # Assert
+        stored = fake_redis.get(key)
+        assert stored is not None, \
+            "크롤링 성공 후 last_crawl_time이 Redis에 저장되어야 함"
+        assert "T" in stored, \
+            "저장된 시각은 ISO 8601(T 구분자) 형식이어야 함"
+        # 저장된 시각이 파싱 가능한지 검증
+        parsed = datetime.fromisoformat(stored)
+        assert isinstance(parsed, datetime), \
+            "저장된 값이 파싱 가능한 datetime이어야 함"
+
+    def test_last_crawl_time_not_updated_when_no_articles_crawled(
+        self, mocker, env_vars_with_last_crawl, fake_redis
+    ):
+        """
+        [AP-35] 크롤링 결과가 0건이면 last_crawl_time이 업데이트되지 않아야 한다.
+
+        검증 목적: 새 기사가 없을 때 since_dt가 앞으로 이동하면 다음 실행에서
+        기사를 놓칠 수 있으므로, 0건이면 기준 시각을 그대로 유지해야 한다.
+        """
+        # Arrange
+        key = env_vars_with_last_crawl["REDIS_LAST_CRAWL_KEY"]
+
+        mocker.patch("article_publisher.get_redis_client", return_value=fake_redis)
+        mocker.patch("article_publisher.run_crawler", return_value=[])
+        mocker.patch("article_publisher.load_published_urls", return_value=set())
+
+        # Act
+        article_publisher.crawl_and_publish()
+
+        # Assert
+        stored = fake_redis.get(key)
+        assert stored is None, \
+            "기사 0건 시 last_crawl_time이 저장되면 안 됨 — since_dt를 그대로 유지해야 함"

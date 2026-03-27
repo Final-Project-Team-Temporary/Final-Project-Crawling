@@ -1,10 +1,12 @@
 """
 test_naver_spider.py
-NaverFinanceNewsCrawler의 단위 테스트 (시나리오 29~36)
+NaverFinanceNewsCrawler의 단위 테스트 (시나리오 NS-29~NS-39)
 
 Scrapy의 HtmlResponse를 직접 생성하여 실제 HTTP 요청 없이 테스트한다.
 parse_article()의 결과는 generator이므로 list()로 소비한다.
 """
+
+from datetime import datetime
 
 import pytest
 from scrapy.http import HtmlResponse
@@ -225,3 +227,70 @@ class TestArticleCountLimit:
         # Assert
         assert len(items) == 0, \
             "max_articles 한도에 도달했을 때 추가 yield가 발생하면 안 됨"
+
+
+# ===========================================================================
+# 증분 크롤링 (since_dt) — 시나리오 NS-37 ~ NS-39
+# ===========================================================================
+
+class TestIncrementalCrawling:
+    """
+    parse_article()이 BaseNewsSpider._should_skip_by_date()를 올바르게 호출하여
+    since_dt 기준으로 기사를 필터링하는지 검증한다.
+    """
+
+    def test_article_after_since_dt_is_yielded(self):
+        """
+        [NS-37] since_dt=2025-01-01이고 기사 날짜가 2025-01-02이면
+        기사가 yield되어야 한다.
+        """
+        # Arrange
+        html = _article_html(date_attr="2025-01-02T10:00:00")
+        response = _make_response("https://example.com/new-article", html)
+        spider = _make_spider()
+        spider.since_dt = datetime(2025, 1, 1, 0, 0, 0)
+
+        # Act
+        items = list(spider.parse_article(response))
+
+        # Assert
+        assert len(items) == 1, \
+            "since_dt 이후 기사는 yield되어야 함"
+        assert items[0]["url"] == "https://example.com/new-article"
+
+    def test_article_before_since_dt_is_skipped(self):
+        """
+        [NS-38] since_dt=2025-02-01이고 기사 날짜가 2025-01-15이면
+        기사가 yield되지 않아야 한다.
+        """
+        # Arrange
+        html = _article_html(date_attr="2025-01-15T10:00:00")
+        response = _make_response("https://example.com/old-article", html)
+        spider = _make_spider()
+        spider.since_dt = datetime(2025, 2, 1, 0, 0, 0)
+
+        # Act
+        items = list(spider.parse_article(response))
+
+        # Assert
+        assert len(items) == 0, \
+            "since_dt 이전 기사는 yield 없이 skip되어야 함"
+
+    def test_article_with_no_date_is_not_skipped_even_with_since_dt(self):
+        """
+        [NS-39] since_dt가 설정돼 있어도 기사 날짜가 없으면(publishedAt=None)
+        기사가 yield되어야 한다 — 날짜 불명 기사는 포함 방향으로 처리한다.
+        """
+        # Arrange — date_attr="" → date_span 없음 → publishedAt=None
+        html = _article_html(date_attr="")
+        response = _make_response("https://example.com/no-date-article", html)
+        spider = _make_spider()
+        spider.since_dt = datetime(2025, 12, 31, 0, 0, 0)  # 아주 최근으로 설정
+
+        # Act
+        items = list(spider.parse_article(response))
+
+        # Assert
+        assert len(items) == 1, \
+            "날짜 정보가 없는 기사는 since_dt와 관계없이 포함되어야 함"
+        assert items[0]["publishedAt"] is None

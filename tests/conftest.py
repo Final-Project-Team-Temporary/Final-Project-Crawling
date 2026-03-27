@@ -1,6 +1,7 @@
 """
 conftest.py — 공통 pytest fixture 정의
 """
+from datetime import datetime
 
 import pytest
 import fakeredis
@@ -62,6 +63,29 @@ def env_vars(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # subprocess fixture
 # ---------------------------------------------------------------------------
+
+@pytest.fixture
+def env_vars_with_last_crawl(monkeypatch, tmp_path):
+    """
+    env_vars에 REDIS_LAST_CRAWL_KEY를 추가한 fixture.
+    증분 크롤링 관련 테스트(get_last_crawl_time / update_last_crawl_time / crawl_and_publish
+    incremental flow)에서 사용한다.
+    """
+    output_file = str(tmp_path / "output.json")
+    vars_map = {
+        "REDIS_HOST":               "localhost",
+        "REDIS_PORT":               "6379",
+        "REDIS_USE_TLS":            "false",
+        "REDIS_SSL_CERT_REQS":      "required",
+        "REDIS_ARTICLE_STREAM_KEY": "test:articles:stream",
+        "REDIS_PUBLISHED_URLS_KEY": "test:published_urls",
+        "REDIS_LAST_CRAWL_KEY":     "test:last_crawl_time",
+        "OUTPUT_FILE_PATH":         output_file,
+    }
+    for key, value in vars_map.items():
+        monkeypatch.setenv(key, value)
+    return vars_map
+
 
 @pytest.fixture
 def mock_subprocess_success(mocker):

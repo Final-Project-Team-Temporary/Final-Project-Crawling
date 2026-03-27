@@ -12,6 +12,7 @@ article_publisher.py
   # Redis Stream / 중복 방지
   REDIS_ARTICLE_STREAM_KEY   - 기사 발행 대상 Stream key (필수)
   REDIS_PUBLISHED_URLS_KEY   - 발행 완료 URL 저장 Set key (필수)
+  REDIS_LAST_CRAWL_KEY       - 마지막 크롤링 시각 저장 key (미설정 시 증분 크롤링 비활성화)
 
   # 크롤러
   OUTPUT_FILE_PATH    - Scrapy 출력 파일 경로 (기본값: /tmp/output.json, Lambda는 /tmp 필수)
@@ -24,6 +25,7 @@ import logging
 import os
 import subprocess
 import time
+from datetime import datetime
 from typing import Optional
 
 import redis as redis_lib
@@ -112,6 +114,50 @@ def get_redis_client() -> redis_lib.Redis:
 
 
 # ---------------------------------------------------------------------------
+# 증분 크롤링 — 마지막 크롤링 시각 관리
+# ---------------------------------------------------------------------------
+
+def get_last_crawl_time(redis_client: redis_lib.Redis) -> Optional[datetime]:
+    """
+    Redis에서 마지막 크롤링 시각을 읽어 datetime으로 반환한다.
+
+    REDIS_LAST_CRAWL_KEY 환경변수가 설정되지 않으면 None을 반환하여
+    전체 크롤링을 수행하도록 한다.
+    """
+    key: str = os.environ.get("REDIS_LAST_CRAWL_KEY", "")
+    if not key:
+        return None
+    try:
+        val: Optional[str] = redis_client.get(key)
+        if val:
+            return datetime.fromisoformat(val)
+        return None
+    except Exception as exc:
+        logger.warning(f"last_crawl_time 조회 실패 (전체 크롤링으로 진행): {exc}")
+        return None
+
+
+def update_last_crawl_time(
+    redis_client: redis_lib.Redis,
+    dt: datetime,
+) -> bool:
+    """
+    Redis에 마지막 크롤링 시각을 ISO 8601 형식으로 저장한다.
+
+    REDIS_LAST_CRAWL_KEY 환경변수가 설정되지 않으면 False를 반환하고 아무것도 하지 않는다.
+    """
+    key: str = os.environ.get("REDIS_LAST_CRAWL_KEY", "")
+    if not key:
+        return False
+    try:
+        redis_client.set(key, dt.isoformat())
+        return True
+    except Exception as exc:
+        logger.warning(f"last_crawl_time 업데이트 실패: {exc}")
+        return False
+
+
+# ---------------------------------------------------------------------------
 # 중복 체크
 # ---------------------------------------------------------------------------
 
@@ -176,21 +222,29 @@ def publish_article(
 # 크롤러 실행
 # ---------------------------------------------------------------------------
 
-def run_crawler() -> list[dict]:
+def run_crawler(since_dt: Optional[datetime] = None) -> list[dict]:
     """
-    naver_spider.py를 subprocess로 실행하고, 출력된 JSONL 파일을 파싱하여
+    naver_crawler.py를 subprocess로 실행하고, 출력된 JSONL 파일을 파싱하여
     기사 dict 목록을 반환한다.
+
+    Args:
+        since_dt: 이 시각 이후 기사만 수집하는 증분 크롤링 기준 시각.
+                  None이면 전체 크롤링(CRAWL_SINCE 환경변수 제거).
+
     크롤러 실행 실패(비정상 종료) 시 RuntimeError를 발생시킨다.
     """
     output_path: str = os.environ.get("OUTPUT_FILE_PATH", "/tmp/output.json")
 
-    # 이전 실행의 파일이 남아 있는 경우 제거
     if os.path.exists(output_path):
         os.remove(output_path)
 
-    # OUTPUT_FILE_PATH를 /tmp 하위로 강제 설정하여 자식 프로세스에 전달
     env = os.environ.copy()
     env["OUTPUT_FILE_PATH"] = output_path
+
+    if since_dt is not None:
+        env["CRAWL_SINCE"] = since_dt.isoformat()
+    else:
+        env.pop("CRAWL_SINCE", None)  # 이전 실행의 잔여 환경변수 제거
 
     logger.info(f"크롤링 시작: python naver_crawler.py (출력: {output_path})")
 
@@ -253,6 +307,14 @@ def crawl_and_publish() -> dict:
     """
     크롤링을 실행하고 결과를 Redis Stream에 발행한다.
 
+    실행 흐름:
+      1. Redis 연결 시도 (증분 크롤링 기준 시각 조회 및 발행을 위해)
+      2. REDIS_LAST_CRAWL_KEY 설정 시 마지막 크롤링 시각(since_dt) 조회
+      3. since_dt를 전달하여 크롤러 실행 (없으면 전체 크롤링)
+      4. Redis 연결 실패 시 전체 기사를 실패 파일로 저장하고 종료
+      5. 중복 URL 캐시 로드 → 기사별 발행 처리
+      6. 크롤링 기사가 1건 이상이면 last_crawl_time 업데이트
+
     반환값:
         {
             "crawled":   int,  # 크롤링된 전체 기사 수
@@ -261,23 +323,38 @@ def crawl_and_publish() -> dict:
             "failed":    int,  # 발행 실패 수
         }
     """
-    # 1. 크롤러 실행
-    articles: list[dict] = run_crawler()
-    total: int = len(articles)
+    crawl_start: datetime = datetime.now()
 
-    # 2. Redis 연결
+    # 1. Redis 연결 시도 (실패해도 크롤링은 계속 진행)
+    redis_client: Optional[redis_lib.Redis] = None
     try:
         redis_client = get_redis_client()
     except ConnectionError as exc:
-        logger.error(f"Redis 연결 불가 — 발행 중단: {exc}")
+        logger.error(f"Redis 연결 불가 — 전체 크롤링으로 진행: {exc}")
+
+    # 2. 증분 크롤링 기준 시각 조회
+    since_dt: Optional[datetime] = None
+    if redis_client is not None:
+        since_dt = get_last_crawl_time(redis_client)
+        if since_dt:
+            logger.info(f"증분 크롤링 기준: {since_dt.isoformat()} 이후 기사만 수집")
+        else:
+            logger.info("초기 실행(last_crawl_time 없음): 전체 크롤링")
+
+    # 3. 크롤러 실행
+    articles: list[dict] = run_crawler(since_dt)
+    total: int = len(articles)
+
+    # 4. Redis 연결 실패 시 전체 실패 처리
+    if redis_client is None:
         _save_failed_articles(articles)
-        print(f"[FAILED_ARTICLES_COUNT] {total}")  # CloudWatch 로깅
+        print(f"[FAILED_ARTICLES_COUNT] {total}")
         return {"crawled": total, "published": 0, "skipped": 0, "failed": total}
 
-    # 3. 중복 URL 캐시 로드 (매 실행마다 신선하게)
+    # 5. 중복 URL 캐시 로드
     published_cache: set[str] = load_published_urls(redis_client)
 
-    # 4. 기사별 개별 처리 (타임아웃 대응: 처리된 것까지 보존)
+    # 6. 기사별 처리
     published: int = 0
     skipped: int = 0
     failed_articles: list[dict] = []
@@ -298,17 +375,21 @@ def crawl_and_publish() -> dict:
 
     failed: int = len(failed_articles)
 
-    # 5. 실패 기사 파일 저장
+    # 7. 실패 기사 파일 저장
     if failed_articles:
         _save_failed_articles(failed_articles)
 
-    # 6. 최종 요약 로그 (CloudWatch에서 검색 가능)
+    # 8. last_crawl_time 업데이트 (크롤링 기사가 1건 이상일 때)
+    if total > 0:
+        update_last_crawl_time(redis_client, crawl_start)
+
+    # 9. 최종 요약 로그
     summary = (
         f"크롤링: {total}건, 발행성공: {published}건, "
         f"중복skip: {skipped}건, 실패: {failed}건"
     )
     logger.info(summary)
-    print(f"[FAILED_ARTICLES_COUNT] {failed}")  # CloudWatch 메트릭 필터용
+    print(f"[FAILED_ARTICLES_COUNT] {failed}")
 
     return {
         "crawled": total,
