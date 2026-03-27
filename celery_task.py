@@ -9,10 +9,11 @@ from datetime import datetime
 
 load_dotenv()
 
-# 1. Celery 설정
-app = Celery('tasks', broker=os.getenv("REDIS_URL"))
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# 2. MongoDB 연결
+
+# MongoDB 연결
 mongo_url = os.getenv("MONGO_URL")
 client = MongoClient(mongo_url)
 db_name = os.getenv("MONGO_DB_NAME", "ArticleDatabase")
@@ -62,7 +63,6 @@ def send_summarization_request(article_ids):
     except Exception as e:
         print(f"❌ 예상치 못한 오류: {str(e)}")
 
-@app.task(bind=True, time_limit=int(os.getenv("CELERY_TASK_TIMEOUT", "600")))
 def crawl_and_store_articles(self):
     timeout_limit = int(os.getenv("CELERY_TASK_TIMEOUT", "600"))
     print(f"🚀 크롤링 시작: python naver_spider.py 실행 (타임아웃: {timeout_limit}초)")
