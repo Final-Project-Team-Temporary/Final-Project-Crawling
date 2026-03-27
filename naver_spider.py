@@ -50,7 +50,7 @@ def format_date_for_spring(date_str):
         return date_str
 
 
-class NaverNewsSpider(scrapy.Spider):
+class NaverFinanceNewsCrawler(scrapy.Spider):
     name = "naver_news"
     start_urls = ['https://news.naver.com/breakingnews/section/101/259']
 
@@ -124,14 +124,12 @@ class NaverNewsSpider(scrapy.Spider):
             elapsed_time = round(time.time() - self.start_time, 3)
             print(f"\n✅ 크롤링 완료! {self.count}개 기사, 소요 시간: {elapsed_time}초")
 
-        # 3. yield 에 press 필드 추가
         yield {
             "title": title.strip() if title else "제목 없음",
             "content": content.strip() if content else "",
             "publishedAt": formatted_date if formatted_date else None,
             "url": response.url,
-            "press": press,  # <--- 언론사 정보 추가
-            "summary_status": "BEFORE_ENQUEUED"
+            "press": press,
         }
 
 
@@ -148,6 +146,6 @@ if __name__ == "__main__":
         "RETRY_TIMES": 2,          # 재시도 2회
         "ROBOTSTXT_OBEY": False    # robots.txt 무시 (속도 향상)
     })
-    process.crawl(NaverNewsSpider)
+    process.crawl(NaverFinanceNewsCrawler)
     process.start()
 

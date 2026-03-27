@@ -3,9 +3,6 @@
 env.json
 /venv
 output.json
-celerybeat-schedule
-celerybeat-schedule-shm
-celerybeat-schedule-wal
 __pycache__
 *.pyc
 .idea/*
