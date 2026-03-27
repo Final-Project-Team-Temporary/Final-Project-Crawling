@@ -92,14 +92,26 @@ class NaverNewsSpider(scrapy.Spider):
             print(f"\n🕒 Start: {time.strftime('%X')}")
             print(f"📊 목표: {self.max_articles}개 기사, 시간 제한: {self.max_crawl_time}초")
 
+        # 1. 기존 데이터 추출
         title = response.css(".media_end_head_headline").xpath("string()").get()
         content = response.css(".go_trans._article_content").xpath("string()").get()
         date = response.css(".media_end_head_info_datestamp_time._ARTICLE_DATE_TIME::attr(data-date-time)").get()
         
+        # 2. 언론사(press) 정보 추출 추가
+        # 기본적으로 로고 이미지의 alt 속성에서 언론사명을 가져옵니다.
+        press = response.css(".media_end_head_top_logo img::attr(alt)").get()
+        # 로고 이미지가 없는 경우 텍스트에서 가져오는 예외 처리
+        if not press:
+            press = response.css(".media_end_head_top_logo::text").get(default="").strip()
+        # 그래도 없으면 기본값 설정
+        if not press:
+            press = "알 수 없음"
+
         # Spring LocalDateTime 파싱 가능한 ISO 8601 형식으로 변환
         formatted_date = format_date_for_spring(date) if date else None
 
         print(f"\n📄 [{self.count + 1}/{self.max_articles}] {response.url}")
+        print(f"언론사: {press}")
         print(f"제목: {title.strip() if title else '없음'}")
         print(f"본문 길이: {len(content.strip()) if content else 0}자")
         if formatted_date:
@@ -112,12 +124,13 @@ class NaverNewsSpider(scrapy.Spider):
             elapsed_time = round(time.time() - self.start_time, 3)
             print(f"\n✅ 크롤링 완료! {self.count}개 기사, 소요 시간: {elapsed_time}초")
 
-        # ✅ 여기서 결과를 반환해야 Scrapy가 저장함!
+        # 3. yield 에 press 필드 추가
         yield {
             "title": title.strip() if title else "제목 없음",
             "content": content.strip() if content else "",
             "publishedAt": formatted_date if formatted_date else None,
             "url": response.url,
+            "press": press,  # <--- 언론사 정보 추가
             "summary_status": "BEFORE_ENQUEUED"
         }
 
