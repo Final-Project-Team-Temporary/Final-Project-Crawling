@@ -9,7 +9,7 @@ parse_article()의 결과는 generator이므로 list()로 소비한다.
 import pytest
 from scrapy.http import HtmlResponse
 
-from naver_spider import NaverFinanceNewsCrawler
+from naver_crawler import NaverFinanceNewsCrawler
 
 
 # ---------------------------------------------------------------------------

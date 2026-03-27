@@ -15,8 +15,8 @@ article_publisher.py
 
   # 크롤러
   OUTPUT_FILE_PATH    - Scrapy 출력 파일 경로 (기본값: /tmp/output.json, Lambda는 /tmp 필수)
-  MAX_ARTICLES        - 최대 크롤링 기사 수 (기본값: 10, naver_spider.py 참조)
-  MAX_CRAWL_TIME      - 크롤링 최대 시간(초) (기본값: 300, naver_spider.py 참조)
+  MAX_ARTICLES        - 최대 크롤링 기사 수 (기본값: 10, naver_crawler.py 참조)
+  MAX_CRAWL_TIME      - 크롤링 최대 시간(초) (기본값: 300, naver_crawler.py 참조)
 """
 
 import json
@@ -192,10 +192,10 @@ def run_crawler() -> list[dict]:
     env = os.environ.copy()
     env["OUTPUT_FILE_PATH"] = output_path
 
-    logger.info(f"크롤링 시작: python naver_spider.py (출력: {output_path})")
+    logger.info(f"크롤링 시작: python naver_crawler.py (출력: {output_path})")
 
     result = subprocess.run(
-        ["python", "naver_spider.py"],
+        ["python", "naver_crawler.py"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
